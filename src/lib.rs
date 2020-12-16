@@ -1,4 +1,3 @@
-use std::{io::prelude::*, rc::Rc};
 use std::sync::{Arc, Mutex};
 use std::thread::{spawn, JoinHandle};
 use std::{
@@ -6,6 +5,7 @@ use std::{
     net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs},
     sync::mpsc::{channel, Receiver, Sender},
 };
+use std::{io::prelude::*, rc::Rc};
 
 pub struct ThreadPool {
     workers: Vec<Worker>,
@@ -92,18 +92,18 @@ enum Message {
     Terminate,
 }
 #[derive(Debug, PartialEq, Eq, Hash)]
-enum Method {
+pub enum Method {
     POST,
     PUT,
     GET,
     DELETE,
 }
 #[derive(Debug, Clone)]
-struct Controller(fn(TcpStream) -> ());
+pub struct Controller(pub fn(TcpStream) -> ());
 pub struct Route {
-    method: Method,
-    path: String,
-    controller: Controller,
+    pub method: Method,
+    pub path: String,
+    pub controller: Controller,
 }
 pub struct JApp {
     routes: HashMap<Method, Vec<(String, Controller)>>,
@@ -111,7 +111,7 @@ pub struct JApp {
     thread_amt: usize,
 }
 pub fn startie(routes: Vec<Route>, address: SocketAddr, thread_amt: usize) -> () {
-    let  mut routeMap: HashMap<Method, Vec<(String, Controller)>> = HashMap::new();
+    let mut routeMap: HashMap<Method, Vec<(String, Controller)>> = HashMap::new();
     routes
         .into_iter()
         .for_each(|r| match routeMap.get_mut(&r.method) {
@@ -135,47 +135,51 @@ pub fn startie(routes: Vec<Route>, address: SocketAddr, thread_amt: usize) -> ()
         let mut first_line = lines.get(0).unwrap().split(" ");
         let verb = first_line.next().unwrap();
         let path = first_line.next().unwrap();
-      
         let controller = match verb {
             "POST" => routeMap.get(&Method::POST).unwrap().into_iter().find(|p| {
                 let mut pattern = String::from("/");
                 pattern.push_str(p.0.as_str());
-                return path.starts_with(pattern.as_str());
+                return path == pattern;
             }),
             "PUT" => routeMap.get(&Method::PUT).unwrap().into_iter().find(|p| {
                 let mut pattern = String::from("/");
                 pattern.push_str(p.0.as_str());
-                return path.starts_with(pattern.as_str());
+                return path == pattern;
             }),
             "GET" => routeMap.get(&Method::GET).unwrap().into_iter().find(|p| {
                 let mut pattern = String::from("/");
                 pattern.push_str(p.0.as_str());
-                return path.starts_with(pattern.as_str());
+                return path == pattern;
             }),
-            "DELETE" => routeMap.get(&Method::DELETE).unwrap().into_iter().find(|p| {
-                let mut pattern = String::from("/");
-                pattern.push_str(p.0.as_str());
-                return path.starts_with(pattern.as_str());
-            }),
+            "DELETE" => routeMap
+                .get(&Method::DELETE)
+                .unwrap()
+                .into_iter()
+                .find(|p| {
+                    let mut pattern = String::from("/");
+                    pattern.push_str(p.0.as_str());
+                    return path == pattern;
+                }),
             _ => routeMap.get(&Method::GET).unwrap().into_iter().find(|p| {
                 let mut pattern = String::from("/");
                 pattern.push_str(p.0.as_str());
-                return path.starts_with(pattern.as_str());
+                return path == pattern;
             }),
         };
-        let thang=controller.unwrap().to_owned().1;
-        pool.execute(move || handle_conn(stream,thang));
+        let thang = controller.unwrap().to_owned().1;
+        pool.execute(move || handle_conn(stream, thang));
     }
 }
 
-fn handle_conn(
-    mut stream: TcpStream,
-    controller: Controller,
-) -> () {
-
-   
+fn handle_conn(mut stream: TcpStream, controller: Controller) -> () {
     controller.0(stream);
 }
 fn default_controller(mut stream: TcpStream) {
     stream.flush().unwrap();
+}
+pub fn create_response_line(code: usize, msg: &str) -> String {
+    format!("HTTP/1.1 {} {}\r\n\r\n", code, msg)
+}
+pub fn create_response(response_line: & str, response: & str) -> String {
+    format!("{}{}", response_line, response)
 }

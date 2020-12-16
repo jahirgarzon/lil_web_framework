@@ -1,54 +1,56 @@
-use hello::ThreadPool;
-use std::fs;
-use std::io::prelude::*;
-use std::net::{TcpListener, TcpStream};
+use std::{fs::read_to_string, io::prelude::*};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
+
+use hello::{Controller, Route, create_response, create_response_line, startie};
+
 fn main() {
-    let listener = TcpListener::bind("0.0.0.0:7878").unwrap();
-    let pool = ThreadPool::new(4).unwrap();
-
-    for stream in listener.incoming() {
-        let stream = stream.unwrap();
-        pool.execute(|| {
-            handle_conn(stream);
-        });
-    }
-}
-
-fn handle_conn(mut stream: TcpStream) {
-    let mut buffer = [0; 1024];
-    stream.read(&mut buffer).unwrap();
-
-    let paths = vec!["funny", "funny_monkey", "hello"];
-    let lines: Vec<Result<String, _>> = buffer.lines().collect();
-    let mut first_line = lines.get(0).unwrap().as_ref().ok().unwrap().split(" ");
-    let verb = first_line.next().unwrap();
-    let path = first_line.next().unwrap();
-    println!("path: {}", path);
-    let response = match path {
-        "/" => Some(""),
-        _ => paths.into_iter().find(|p| {
-            let mut pattern = String::from("/");
-            pattern.push_str(p.to_owned());
-            return path.starts_with(pattern.as_str());
-        }),
-    };
-
-    let a = match response {
-        Some("/") => ("HTTP/1.1 200 OK\r\n\r\n", String::from(".html")),
-        Some(good_path) => {
-            let mut good_path = good_path.to_string();
-            good_path.push_str(".html");
-            ("HTTP/1.1 200 OK\r\n\r\n", good_path)
+    let socket = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 7878);
+    let routes = vec![
+         Route{
+            method:hello::Method::GET,
+            path:String::from("funny"),
+            controller:Controller(|mut s:TcpStream|{
+                let page = read_to_string("funny.html").unwrap();
+                let rl =create_response_line(200, "OK");
+                let response = create_response(&rl, &page);
+                s.write(response.as_bytes()).unwrap();
+                s.flush().unwrap();
+            })
+        },
+         Route{
+            method:hello::Method::GET,
+            path:String::from("funnymonkey"),
+            controller:Controller(|mut s:TcpStream|{
+                let page = read_to_string("funny_monkey.html").unwrap();
+                let rl =create_response_line(200, "OK");
+                let response = create_response(&rl, &page);
+                s.write(response.as_bytes()).unwrap();
+                s.flush().unwrap();
+            })
+        },
+         Route{
+            method:hello::Method::GET,
+            path:String::from("hello"),
+            controller:Controller(|mut s:TcpStream|{
+                let page = read_to_string("hello.html").unwrap();
+                let rl =create_response_line(200, "OK");
+                let response = create_response(&rl, &page);
+                s.write(response.as_bytes()).unwrap();
+                s.flush().unwrap();
+            })
+        },
+        Route{
+            method:hello::Method::GET,
+            path:String::from(""),
+            controller:Controller(|mut s:TcpStream|{
+                let page = read_to_string(".html").unwrap();
+                let rl =create_response_line(200, "OK");
+                let response = create_response(&rl, &page);
+                s.write(response.as_bytes()).unwrap();
+                s.flush().unwrap();
+            })
         }
-        None => (
-            "HTTP/1.1 404 NOT FOUND\r\n\r\n",
-            "notfound.html".to_string(),
-        ),
-    };
+    ];
 
-    let (status_line, filename) = a;
-    let content = fs::read_to_string(filename).unwrap();
-    let response = format!("{}{}", status_line, content);
-    stream.write(response.as_bytes()).unwrap();
-    stream.flush().unwrap();
+    startie(routes, socket, 4)
 }
