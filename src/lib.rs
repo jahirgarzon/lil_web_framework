@@ -1,11 +1,11 @@
+use std::{io::prelude::*, net::Shutdown};
 use std::sync::{Arc, Mutex};
 use std::thread::{spawn, JoinHandle};
 use std::{
     collections::HashMap,
-    net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs},
+    net::{SocketAddr, TcpListener, TcpStream},
     sync::mpsc::{channel, Receiver, Sender},
 };
-use std::{io::prelude::*, rc::Rc};
 
 pub struct ThreadPool {
     workers: Vec<Worker>,
@@ -62,13 +62,11 @@ impl Drop for ThreadPool {
 pub struct PoolCreationError;
 
 struct Worker {
-    id: usize,
     thread: Option<JoinHandle<()>>,
 }
 impl Worker {
     fn new(id: usize, receiver: Arc<Mutex<Receiver<Message>>>) -> Worker {
         Worker {
-            id,
             thread: Some(spawn(move || loop {
                 let message = receiver.lock().unwrap().recv().unwrap();
                 match message {
@@ -105,22 +103,18 @@ pub struct Route {
     pub path: String,
     pub controller: Controller,
 }
-pub struct JApp {
-    routes: HashMap<Method, Vec<(String, Controller)>>,
-    address: SocketAddr,
-    thread_amt: usize,
-}
+
 pub fn startie(routes: Vec<Route>, address: SocketAddr, thread_amt: usize) -> () {
-    let mut routeMap: HashMap<Method, Vec<(String, Controller)>> = HashMap::new();
+    let mut route_map: HashMap<Method, Vec<(String, Controller)>> = HashMap::new();
     routes
         .into_iter()
-        .for_each(|r| match routeMap.get_mut(&r.method) {
+        .for_each(|r| match route_map.get_mut(&r.method) {
             Some(stuff) => {
                 stuff.push((r.path, r.controller));
             }
             None => {
                 let new_one = vec![(r.path, r.controller)];
-                routeMap.insert(r.method, new_one);
+                route_map.insert(r.method, new_one);
             }
         });
 
@@ -136,22 +130,22 @@ pub fn startie(routes: Vec<Route>, address: SocketAddr, thread_amt: usize) -> ()
         let verb = first_line.next().unwrap();
         let path = first_line.next().unwrap();
         let controller = match verb {
-            "POST" => routeMap.get(&Method::POST).unwrap().into_iter().find(|p| {
+            "POST" => route_map.get(&Method::POST).unwrap().into_iter().find(|p| {
                 let mut pattern = String::from("/");
                 pattern.push_str(p.0.as_str());
                 return path == pattern;
             }),
-            "PUT" => routeMap.get(&Method::PUT).unwrap().into_iter().find(|p| {
+            "PUT" => route_map.get(&Method::PUT).unwrap().into_iter().find(|p| {
                 let mut pattern = String::from("/");
                 pattern.push_str(p.0.as_str());
                 return path == pattern;
             }),
-            "GET" => routeMap.get(&Method::GET).unwrap().into_iter().find(|p| {
+            "GET" => route_map.get(&Method::GET).unwrap().into_iter().find(|p| {
                 let mut pattern = String::from("/");
                 pattern.push_str(p.0.as_str());
                 return path == pattern;
             }),
-            "DELETE" => routeMap
+            "DELETE" => route_map
                 .get(&Method::DELETE)
                 .unwrap()
                 .into_iter()
@@ -160,26 +154,46 @@ pub fn startie(routes: Vec<Route>, address: SocketAddr, thread_amt: usize) -> ()
                     pattern.push_str(p.0.as_str());
                     return path == pattern;
                 }),
-            _ => routeMap.get(&Method::GET).unwrap().into_iter().find(|p| {
+            _ => route_map.get(&Method::GET).unwrap().into_iter().find(|p| {
                 let mut pattern = String::from("/");
                 pattern.push_str(p.0.as_str());
                 return path == pattern;
             }),
         };
-        let thang = controller.unwrap().to_owned().1;
+        
+        let thang = match controller {
+            Some((_,cont))=>{
+                cont.to_owned()
+            },
+            None=> {
+             Controller(default_controller)
+            }
+        };
         pool.execute(move || handle_conn(stream, thang));
     }
 }
 
-fn handle_conn(mut stream: TcpStream, controller: Controller) -> () {
+fn handle_conn( stream: TcpStream, controller: Controller) -> () {
     controller.0(stream);
 }
 fn default_controller(mut stream: TcpStream) {
     stream.flush().unwrap();
+    stream.shutdown(Shutdown::Both).unwrap();
 }
 pub fn create_response_line(code: usize, msg: &str) -> String {
-    format!("HTTP/1.1 {} {}\r\n\r\n", code, msg)
+    format!("HTTP/1.1 {} {}\r\n", code, msg)
 }
-pub fn create_response(response_line: & str, response: & str) -> String {
-    format!("{}{}", response_line, response)
+
+pub fn create_headers(headers: Vec<(&str, &str)>) -> String {
+    headers
+        .into_iter()
+        .map(|header| {
+            let (name, value) = header;
+            format!("{}: {}\r\n", name, value)
+        })
+        .collect()
+}
+
+pub fn create_response(response_line: &str, headers: &str, body: &str) -> String {
+    format!("{}{}\r\n{}", response_line, headers, body)
 }
