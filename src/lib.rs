@@ -6,6 +6,7 @@ use std::{
     net::{SocketAddr, TcpListener, TcpStream},
     sync::mpsc::{channel, Receiver, Sender},
 };
+use regex::Regex;
 
 pub struct ThreadPool {
     workers: Vec<Worker>,
@@ -124,7 +125,6 @@ pub fn startie(routes: Vec<Route>, address: SocketAddr, thread_amt: usize) -> ()
         let mut stream = stream.unwrap();
         let mut buffer = [0; 1024];
         stream.read(&mut buffer).unwrap();
-
         let lines: Vec<String> = buffer.lines().map(|l| l.unwrap().to_string()).collect();
         let mut first_line = lines.get(0).unwrap().split(" ");
         let verb = first_line.next().unwrap();
@@ -197,3 +197,21 @@ pub fn create_headers(headers: Vec<(&str, &str)>) -> String {
 pub fn create_response(response_line: &str, headers: &str, body: &str) -> String {
     format!("{}{}\r\n{}", response_line, headers, body)
 }
+
+pub fn send_downstream(mut stream: TcpStream,body:&str,headers:Option<Vec<(&str, &str)>>)->(){
+    let rl = create_response_line(200, "OK");
+    let headers = match headers {
+        Some(mut heads)=>{
+            heads.push(("Content-Length", body.len().to_string().as_str()));
+            create_headers(vec![("Content-Length", body.len().to_string().as_str())])
+        },
+        None=>{
+            create_headers(vec![("Content-Length", body.len().to_string().as_str())])
+        }
+    };
+    let response = create_response(&rl, &headers, &body);
+    stream.write(response.as_bytes()).unwrap();
+    stream.flush().unwrap();
+    stream.shutdown(Shutdown::Both).unwrap();
+}
+
