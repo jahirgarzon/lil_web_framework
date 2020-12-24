@@ -6,7 +6,6 @@ use std::{
     net::{SocketAddr, TcpListener, TcpStream},
     sync::mpsc::{channel, Receiver, Sender},
 };
-use regex::Regex;
 
 pub struct ThreadPool {
     workers: Vec<Worker>,
@@ -202,8 +201,9 @@ pub fn send_downstream(mut stream: TcpStream,body:&str,headers:Option<Vec<(&str,
     let rl = create_response_line(200, "OK");
     let headers = match headers {
         Some(mut heads)=>{
-            heads.push(("Content-Length", body.len().to_string().as_str()));
-            create_headers(vec![("Content-Length", body.len().to_string().as_str())])
+          let size=  format!("{}",body.len());
+            heads.push(("Content-Length", &size));
+            create_headers(heads)
         },
         None=>{
             create_headers(vec![("Content-Length", body.len().to_string().as_str())])
